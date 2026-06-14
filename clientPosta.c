@@ -4,7 +4,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
-#include "header.h"
 struct user{
     char nome[50];
     char cognome[50];
@@ -22,6 +21,10 @@ struct datiSpedizione
     char città[50];
     int  cap;
     char civico[4];
+    double pesoPacco;
+    double altezza;
+    double larghezza;
+    double profondità;
 };
 typedef struct datiSpedizione destinatario;
 struct track
@@ -169,7 +172,7 @@ int main(){
         system("clear");
         printf("SERVIZIO POSTALE!\n 1. Invia Pacco \n 2. Traccia Spedizione \n 3. Calcola Tariffa \n 4. Visualizza Storico Spedizioni\n 0. Esci\n Operazione: ");
         scanf("%d", &operazione);
-        int sockInvioPacco, sockTracciamento, sockTariffa, sockStorico;
+        int sockCalcolaTariffa, sockInvioPacco, sockTracciamento, sockTariffa, sockStorico;
         switch (operazione)
         {
             
@@ -203,6 +206,12 @@ int main(){
                 
                 printf("Cap: ");
                 scanf("%d",&infoPacco.cap);
+                infoPacco.pesoPacco=-1.0;
+                while(infoPacco.pesoPacco<0.0 || infoPacco.pesoPacco>20.0)
+                {
+                    printf("Puoi spedire pacchi non superiore ai 20KG: \nIndica il peso del pacco: ");
+                    scanf("%lf",&infoPacco.pesoPacco);
+                }
                 
 
                 if((sockInvioPacco = socket(AF_INET, SOCK_STREAM,0))<0)
@@ -228,13 +237,17 @@ int main(){
                 recv(sockInvioPacco,&trackInfo,sizeof(trackInfo),0);
                 if(trackInfo.flag==1)
                 {
-                    printf("Spedizione presa in carico!!!\nCodice della spedizione: %d",trackInfo.trackcode);
+                    printf("Spedizione presa in carico!!!\nCodice della spedizione: %s",trackInfo.trackcode);
+                    printf("\n");
                 }else{
                     printf("Spedizione fallita!!!\n");
+                    close(sockInvioPacco);
+                    sleep(5);
+                    break;
                 }
                 close(sockInvioPacco);
                 
-                sleep(4);
+                sleep(5);
                 
                 break;
                    
@@ -274,6 +287,7 @@ int main(){
                     
                 }else{
                     printf("Codice di Tracciamento errato!\n");
+                    sleep(5);
                     break;
                 }
                 printf("%s", bufferTrack);
@@ -281,6 +295,58 @@ int main(){
                 sleep(5);
                 break;
             case 3: // Richiesta di calcolo Tariffa
+                
+                infoPacco.pesoPacco = -1.0;
+                while(infoPacco.pesoPacco<0.0 || infoPacco.pesoPacco>20.0)
+                {
+                    printf("Calcola la tariffa della spedizione:\nPeso del pacco: ");
+                    scanf("%lf",&infoPacco.pesoPacco);
+                }
+
+                infoPacco.altezza = -1.0;
+                printf("%lf", infoPacco.altezza);
+                while(infoPacco.altezza<0.0 || infoPacco.altezza>80.0)
+                {
+                    printf("Altezza massima del pacco 80cm:\nAltezza Pacco: ");
+                    scanf("%lf", &infoPacco.altezza);
+                }
+                
+                infoPacco.larghezza = -1.0;
+                while(infoPacco.larghezza<0.0 || infoPacco.larghezza>120)
+                {
+                    printf("Larghezza massima del pacco 120cm:\nLarghezza Pacco: ");
+                    scanf("%lf",&infoPacco.larghezza);
+                }
+
+                infoPacco.profondità = -1.0;
+                while(infoPacco.profondità<0.0 || infoPacco.profondità>80.0)
+                {
+                    printf("Profondità massima del pacco 80cm:\nProfondità Pacco: ");
+                    scanf("%lf", &infoPacco.profondità);
+                }
+
+                if((sockCalcolaTariffa=socket(AF_INET, SOCK_STREAM,0))<0)
+                {
+                    perror("sockCalcolaTariffa");
+                    exit(1);
+                }
+
+                inet_pton(AF_INET, addressString,&server_addr.sin_addr);
+
+                if(connect(sockCalcolaTariffa,(struct sockaddr*)&server_addr,sizeof(server_addr))<0)
+                {
+                    perror("sockCalcolaTariffa");
+                    exit(1);
+                }
+                double prezzoSpedizione;
+                userData.flagOp=5;
+                send(sockCalcolaTariffa,&userData,sizeof(userData),0);
+                send(sockCalcolaTariffa,&infoPacco, sizeof(infoPacco),0);
+                recv(sockCalcolaTariffa, &prezzoSpedizione, sizeof(prezzoSpedizione),0);
+                
+                printf("Il prezzo per spedire il tuo pacco è di €%lf",prezzoSpedizione);
+                printf("\n");
+                sleep(5);
                 break;
             case 4: 
             
@@ -321,10 +387,6 @@ int main(){
         }
     }
     return 0;
-}
-void invioPacco()
-{
-
 }
 void storico(User userData, int sockStorico,struct sockaddr_in server_addr, char addressString[])
 {

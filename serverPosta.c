@@ -32,6 +32,10 @@ struct datiSpedizione
     char città[50];
     int  cap;
     char civico[4];
+    double pesoPacco;
+    double altezza;
+    double larghezza;
+    double profondità;
 };
 struct track
 {
@@ -178,7 +182,8 @@ void inviaPacco(User userData ,int sock)
         printf("Errore in recv!\n");
         return;
     }
-    char *queryInsert="INSERT INTO spedizioni (tracking_code,username_mittente, nome_destinatario, cognome_destinatario, via, cap, Città, data_spedizione, stato, Civico ) VALUES (?,?,?,?,?,?,?,?,?,?)";
+    char *querySelectPeso="SELECT prezzo FROM tariffe WHERE peso_max=?";
+    char *queryInsert="INSERT INTO spedizioni (tracking_code,username_mittente, nome_destinatario, cognome_destinatario, via, cap, Città, data_spedizione, stato, Civico, peso ) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
     char *querySelect="SELECT tracking_code FROM spedizioni WHERE tracking_code=?";
     int track=1;
     while(track){
@@ -188,7 +193,9 @@ void inviaPacco(User userData ,int sock)
         sqlite3_prepare_v2(db, querySelect, -1, &stm,NULL);
 
         sqlite3_bind_text(stm, 1,trackInfo.trackcode,-1, SQLITE_STATIC);
-
+        /*LOGICA:  Se il codice generato casualmente esiste, imposta track = 1 
+        e ricrea un nuovo codice. Nel caso in cui fosse diverso da quelli esistenti 
+        nel database, va ad inserire la nuova spedizione*/
         if(sqlite3_step(stm)==SQLITE_ROW)
         {
             track=1;
@@ -217,17 +224,13 @@ void inviaPacco(User userData ,int sock)
             sqlite3_bind_text(stm, 8, time, -1, SQLITE_STATIC);
             sqlite3_bind_text(stm, 9, "In Preparazione",-1, SQLITE_STATIC);
             sqlite3_bind_text(stm, 10, infoPacco.civico, -1, SQLITE_STATIC);
-
+            sqlite3_bind_double(stm, 11, infoPacco.pesoPacco);
             if(sqlite3_step(stm)==SQLITE_DONE)
             {
                 trackInfo.flag=1;
             }else{
                 trackInfo.flag=0;
             }
-
-            sqlite3_finalize(stm);
-            sqlite3_close(db);
-
             send(sock,&trackInfo,sizeof(trackInfo),0);
             track=0;
         }
@@ -270,7 +273,7 @@ void trackSpedizione(User userData, int sock)
         userData.flagOk=1;
         char *stato_spedizione = (char*) sqlite3_column_text(stm,8);  
         char buffer[256];
-
+        
         send(sock,&userData.flagOk, sizeof(userData.flagOk),0);
 
         snprintf(buffer,sizeof(buffer), "Stato della spedizione: %s\n",stato_spedizione);
@@ -285,8 +288,35 @@ void trackSpedizione(User userData, int sock)
     close(sock);
     pthread_mutex_unlock(&db_mutex);
 }
-void calcoloTariffa()
-{}
+void calcoloTariffa(int sock)
+{
+    sqlite3 *db;
+    sqlite3_stmt *stm;
+    destinatario infoPacco;
+    recv(sock,&infoPacco, sizeof(infoPacco),0);
+    pthread_mutex_lock(&db_mutex);
+    char *querySelect = "SELECT prezzo FROM tariffe WHERE peso_max>=? AND larghezza_max >=? AND altezza_max>=? AND profondita_max >=?";
+    sqlite3_open("database.db", &db);
+    int rc = sqlite3_prepare_v2(db, querySelect, -1, &stm, NULL);
+
+    sqlite3_bind_double(stm, 1, infoPacco.pesoPacco);
+    sqlite3_bind_double(stm, 2, infoPacco.larghezza);
+    sqlite3_bind_double(stm, 3, infoPacco.altezza);
+    sqlite3_bind_double(stm, 4, infoPacco.profondità);
+   
+    if(sqlite3_step(stm)==SQLITE_ROW)
+    {
+        double prezzoSpedizione = sqlite3_column_double(stm,0);
+        printf("%lf",prezzoSpedizione);
+        send(sock,&prezzoSpedizione,sizeof(prezzoSpedizione),0);
+    }else{
+        printf("Errore nel calcolo della tariffa");
+    }
+    sqlite3_finalize(stm);
+    sqlite3_close(db);
+    close(sock);
+    pthread_mutex_unlock(&db_mutex);
+}
 void storico(User userData, int sock)
 {
     pthread_mutex_lock(&db_mutex);
@@ -312,7 +342,6 @@ void storico(User userData, int sock)
         char buffer[512];
         snprintf(buffer, sizeof(buffer), "STORICO|%s|%s|%s|%s|%d|%s|%s|%s|\n",tracking_code,nome_destinatario,cognome_destinatario,via,cap,città,Civico,data_spedizione);
         send(sock,buffer, strlen(buffer),0);
-        printf("%s",buffer);
     }
 
     send(sock, "END",sizeof("END"),0);
@@ -358,9 +387,10 @@ void *gestoreRichiesta(void* arg)
              break;
 
         case 5://Calcolo Tariffa
+            printf("scelto calcolo tariffa!\n");
                 /*Calcolo il codice della tariffa in base ai dati immessi dall'utente come peso, dimensioni del pacco;
                 invio i dati al client*/
-            calcoloTariffa();
+            calcoloTariffa(sock);
             break;
 
         case 6://Visualizzazione Storico Spedizioni
